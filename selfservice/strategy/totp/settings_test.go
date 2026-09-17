@@ -25,6 +25,7 @@ import (
 	"github.com/ory/kratos/pkg/testhelpers"
 	"github.com/ory/kratos/selfservice/flow"
 	"github.com/ory/kratos/selfservice/flow/settings"
+	"github.com/ory/kratos/selfservice/hook/hooktest"
 	"github.com/ory/kratos/selfservice/strategy/totp"
 	"github.com/ory/kratos/session"
 	"github.com/ory/kratos/text"
@@ -261,6 +262,39 @@ func TestCompleteSettings(t *testing.T) {
 			assert.EqualValues(t, flow.StateSuccess, gjson.Get(actual, "state").String(), actual)
 			checkIdentity(t, id)
 			assert.Empty(t, gjson.Get(actual, "continue_with").Array(), "%s", actual)
+		})
+	})
+
+	t.Run("case=should pass transient payload to after settings hooks", func(t *testing.T) {
+		webhook := hooktest.NewServer()
+		t.Cleanup(webhook.Close)
+		webhook.SetConfig(t, conf.GetProvider(t.Context()), config.HookStrategyKey(config.ViperKeySelfServiceSettingsAfter, identity.CredentialsTypeTOTP.String()))
+
+		transientPayload := `{"stuff":"42"}`
+		payload := func(v url.Values) {
+			v.Set("totp_unlink", "true")
+			v.Set("transient_payload", transientPayload)
+		}
+
+		t.Run("type=api", func(t *testing.T) {
+			id, _, _ := createIdentity(t.Context(), t, reg)
+			actual, res := doAPIFlow(t, payload, id)
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
+
+		t.Run("type=spa", func(t *testing.T) {
+			id, _, _ := createIdentity(t.Context(), t, reg)
+			actual, res := doBrowserFlow(t, true, payload, id)
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
+
+		t.Run("type=browser", func(t *testing.T) {
+			id, _, _ := createIdentity(t.Context(), t, reg)
+			actual, res := doBrowserFlow(t, false, payload, id)
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
+			webhook.AssertTransientPayload(t, transientPayload)
 		})
 	})
 

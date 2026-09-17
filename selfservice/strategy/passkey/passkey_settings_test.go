@@ -27,6 +27,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/ory/kratos/selfservice/flow/settings"
+	"github.com/ory/kratos/selfservice/hook/hooktest"
 	"github.com/ory/kratos/text"
 	"github.com/ory/kratos/ui/node"
 
@@ -477,6 +478,50 @@ func TestCompleteSettings(t *testing.T) {
 				assert.True(t, ok)
 				assert.Len(t, gjson.GetBytes(cred.Config, "credentials").Array(), 1)
 			})
+		}
+
+		t.Run("type=browser", func(t *testing.T) {
+			run(t, "browser")
+		})
+
+		t.Run("type=spa", func(t *testing.T) {
+			run(t, "spa")
+		})
+
+		t.Run("type=api", func(t *testing.T) {
+			run(t, "api")
+		})
+	})
+
+	t.Run("case=should pass transient payload to after settings hooks", func(t *testing.T) {
+		webhook := hooktest.NewServer()
+		t.Cleanup(webhook.Close)
+		webhook.SetConfig(t, fix.conf.GetProvider(t.Context()), config.HookStrategyKey(config.ViperKeySelfServiceSettingsAfter, identity.CredentialsTypePasskey.String()))
+
+		transientPayload := `{"stuff":"42"}`
+		run := func(t *testing.T, flowType string) {
+			id := fix.createIdentity(t)
+			allCred, ok := id.GetCredentials(identity.CredentialsTypePasskey)
+			require.True(t, ok)
+
+			var cc identity.CredentialsWebAuthnConfig
+			require.NoError(t, json.Unmarshal(allCred.Config, &cc))
+			require.NotEmpty(t, cc.Credentials)
+
+			values := func(v url.Values) {
+				v.Set(node.PasskeyRemove, fmt.Sprintf("%x", cc.Credentials[0].ID))
+				v.Set("transient_payload", transientPayload)
+			}
+
+			var body string
+			if flowType == "api" {
+				body, _ = doAPIFlow(t, values, id)
+			} else {
+				body, _ = doBrowserFlow(t, flowType == "spa", values, id)
+			}
+
+			require.EqualValues(t, flow.StateSuccess, gjson.Get(body, "state").String(), body)
+			webhook.AssertTransientPayload(t, transientPayload)
 		}
 
 		t.Run("type=browser", func(t *testing.T) {
