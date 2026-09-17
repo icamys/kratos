@@ -466,6 +466,27 @@ func TestCompleteSettings(t *testing.T) {
 			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
 			webhook.AssertTransientPayload(t, transientPayload)
 		})
+
+		t.Run("type=browser/resumed after reauthentication", func(t *testing.T) {
+			id, _ := createIdentity(t, reg)
+			browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, id)
+
+			loginUI := conf.GetProvider(ctx).String(config.ViperKeySelfServiceLoginUI)
+			conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1ns")
+			t.Cleanup(func() {
+				conf.MustSet(ctx, config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "5m")
+				conf.MustSet(ctx, config.ViperKeySelfServiceLoginUI, loginUI)
+			})
+			_ = testhelpers.NewSettingsLoginAcceptAPIServer(t, testhelpers.NewSDKCustomClient(publicTS, browserClient), conf)
+
+			f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, false, publicTS)
+			values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
+			payload(values)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, false, false, f, browserClient, testhelpers.EncodeFormAsJSON(t, false, values))
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
 	})
 
 	t.Run("type=regenerate with confirmation", func(t *testing.T) {

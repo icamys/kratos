@@ -560,6 +560,33 @@ func TestCompleteSettings(t *testing.T) {
 		t.Run("type=spa", func(t *testing.T) {
 			run(t, true)
 		})
+
+		t.Run("type=browser/resumed after reauthentication", func(t *testing.T) {
+			id := createIdentity(t.Context(), t, reg)
+			id.DeleteCredentialsType(identity.CredentialsTypePassword)
+			id.UpsertCredentialsConfig(identity.CredentialsTypeWebAuthn, sqlxx.JSONRawMessage(`{"credentials":[{"id":"Zm9vZm9v","display_name":"foo","is_passwordless":false}]}`), 0)
+			require.NoError(t, reg.IdentityManager().Update(t.Context(), id, identity.ManagerAllowWriteProtectedTraits))
+
+			browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, id)
+
+			loginUI := conf.GetProvider(t.Context()).String(config.ViperKeySelfServiceLoginUI)
+			conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1ns")
+			t.Cleanup(func() {
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1m")
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceLoginUI, loginUI)
+			})
+			_ = testhelpers.NewSettingsLoginAcceptAPIServer(t, testhelpers.NewSDKCustomClient(publicTS, browserClient), conf)
+
+			f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, false, publicTS)
+			values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
+			values.Set(node.WebAuthnRemove, "666f6f666f6f")
+			values.Set("transient_payload", transientPayload)
+
+			body, res := testhelpers.SettingsMakeRequest(t, false, false, f, browserClient, testhelpers.EncodeFormAsJSON(t, false, values))
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", body)
+			require.EqualValues(t, flow.StateSuccess, gjson.Get(body, "state").String(), body)
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
 	})
 
 	t.Run("case=remove all security keys", func(t *testing.T) {

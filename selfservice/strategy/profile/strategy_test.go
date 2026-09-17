@@ -513,6 +513,26 @@ func TestStrategyTraits(t *testing.T) {
 			expectSuccess(t, false, false, browserUser1, payload)
 			webhook.AssertTransientPayload(t, transientPayload)
 		})
+
+		t.Run("type=browser/resumed after reauthentication", func(t *testing.T) {
+			setUnprivileged(t)
+
+			bi := newIdentityWithPassword(x.NewUUID().String() + "@ory.sh")
+			browserUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(ctx, t, reg, bi)
+			browserUser.Jar.SetCookies(nosurfx.WithFakeCSRFCookie(t, reg, publicTS.URL))
+
+			loginUI := conf.GetProvider(ctx).String(config.ViperKeySelfServiceLoginUI)
+			t.Cleanup(func() {
+				conf.MustSet(ctx, config.ViperKeySelfServiceLoginUI, loginUI)
+			})
+			_ = testhelpers.NewSettingsLoginAcceptAPIServer(t, testhelpers.NewSDKCustomClient(publicTS, browserUser), conf)
+
+			expectSuccess(t, false, false, browserUser, func(v url.Values) {
+				payload(v)
+				v.Set("traits.email", x.NewUUID().String()+"@ory.sh")
+			})
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
 	})
 
 	t.Run("flow=try another update with invalid data", func(t *testing.T) {

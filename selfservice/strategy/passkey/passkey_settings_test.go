@@ -535,6 +535,36 @@ func TestCompleteSettings(t *testing.T) {
 		t.Run("type=api", func(t *testing.T) {
 			run(t, "api")
 		})
+
+		t.Run("type=browser/resumed after reauthentication", func(t *testing.T) {
+			id := fix.createIdentity(t)
+			allCred, ok := id.GetCredentials(identity.CredentialsTypePasskey)
+			require.True(t, ok)
+
+			var cc identity.CredentialsWebAuthnConfig
+			require.NoError(t, json.Unmarshal(allCred.Config, &cc))
+			require.NotEmpty(t, cc.Credentials)
+
+			browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, fix.reg, id)
+
+			loginUI := fix.conf.GetProvider(t.Context()).String(config.ViperKeySelfServiceLoginUI)
+			fix.conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1ns")
+			t.Cleanup(func() {
+				fix.conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "5m")
+				fix.conf.MustSet(t.Context(), config.ViperKeySelfServiceLoginUI, loginUI)
+			})
+			_ = testhelpers.NewSettingsLoginAcceptAPIServer(t, testhelpers.NewSDKCustomClient(fix.publicTS, browserClient), fix.conf)
+
+			f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, false, fix.publicTS)
+			values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
+			values.Set(node.PasskeyRemove, fmt.Sprintf("%x", cc.Credentials[0].ID))
+			values.Set("transient_payload", transientPayload)
+
+			body, res := testhelpers.SettingsMakeRequest(t, false, false, f, browserClient, testhelpers.EncodeFormAsJSON(t, false, values))
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", body)
+			require.EqualValues(t, flow.StateSuccess, gjson.Get(body, "state").String(), body)
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
 	})
 
 	t.Run("case=remove all passkeys", func(t *testing.T) {

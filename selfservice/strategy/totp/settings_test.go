@@ -296,6 +296,28 @@ func TestCompleteSettings(t *testing.T) {
 			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
 			webhook.AssertTransientPayload(t, transientPayload)
 		})
+
+		t.Run("type=browser/resumed after reauthentication", func(t *testing.T) {
+			id, _, _ := createIdentity(t.Context(), t, reg)
+			browserClient := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, id)
+
+			loginUI := conf.GetProvider(t.Context()).String(config.ViperKeySelfServiceLoginUI)
+			conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1ns")
+			t.Cleanup(func() {
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1m")
+				conf.MustSet(t.Context(), config.ViperKeySelfServiceLoginUI, loginUI)
+			})
+			_ = testhelpers.NewSettingsLoginAcceptAPIServer(t, testhelpers.NewSDKCustomClient(publicTS, browserClient), conf)
+
+			f := testhelpers.InitializeSettingsFlowViaBrowser(t, browserClient, false, publicTS)
+			values := testhelpers.SDKFormFieldsToURLValues(f.Ui.Nodes)
+			values.Set("method", "totp")
+			payload(values)
+
+			actual, res := testhelpers.SettingsMakeRequest(t, false, false, f, browserClient, testhelpers.EncodeFormAsJSON(t, false, values))
+			require.Equal(t, http.StatusOK, res.StatusCode, "%s", actual)
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
 	})
 
 	t.Run("type=set up TOTP device but code is incorrect", func(t *testing.T) {

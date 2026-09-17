@@ -589,6 +589,22 @@ func TestSettings(t *testing.T) {
 			expectSuccess(t, false, false, browserUser, payload)
 			webhook.AssertTransientPayload(t, transientPayload)
 		})
+
+		t.Run("type=browser/resumed after reauthentication", func(t *testing.T) {
+			bi := newIdentityWithoutCredentials(x.NewUUID().String() + "@ory.sh")
+			browserUser := testhelpers.NewHTTPClientWithIdentitySessionCookie(t.Context(), t, reg, bi)
+
+			loginUI := conf.GetProvider(t.Context()).String(config.ViperKeySelfServiceLoginUI)
+			conf.MustSet(t.Context(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1ns")
+			t.Cleanup(func() {
+				conf.MustSet(context.Background(), config.ViperKeySelfServiceSettingsPrivilegedAuthenticationAfter, "1m")
+				conf.MustSet(context.Background(), config.ViperKeySelfServiceLoginUI, loginUI)
+			})
+			_ = testhelpers.NewSettingsLoginAcceptAPIServer(t, testhelpers.NewSDKCustomClient(publicTS, browserUser), conf)
+
+			expectSuccess(t, false, false, browserUser, payload)
+			webhook.AssertTransientPayload(t, transientPayload)
+		})
 	})
 
 	t.Run("description=should update the password and perform the correct redirection", func(t *testing.T) {
